@@ -6,6 +6,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Motor } from "@/lente/motor";
 
+// Plano B: se o navegador não abrir o 3D (sem WebGL2, aceleração desligada),
+// a página mostra imagens das cenas em vez de quebrar
+function criarMotor(...args: ConstructorParameters<typeof Motor>): Motor | null {
+  try {
+    return new Motor(...args);
+  } catch (e) {
+    console.warn("O 3D não abriu neste navegador:", e);
+    return null;
+  }
+}
+
 const SECOES = [
   {
     id: "abertura",
@@ -47,17 +58,23 @@ export default function Experiencia() {
   const secoesRef = useRef<(HTMLElement | null)[]>([]);
   const [pronto, setPronto] = useState(false);
   const [planta, setPlanta] = useState(false);
+  const [sem3d, setSem3d] = useState(false);
+  const fundosRef = useRef<(HTMLImageElement | null)[]>([]);
   const [modoFoto, setModoFoto] = useState(false);
 
   useEffect(() => {
     if (!canvasRef.current || !rotulosRef.current) return;
-    const motor = new Motor(canvasRef.current, rotulosRef.current, {
+    const motor = criarMotor(canvasRef.current, rotulosRef.current, {
       aoFicarPronto: () => setPronto(true),
       aoSegurar: (p) => {
         if (anelRef.current) anelRef.current.style.strokeDashoffset = String(126 * (1 - p));
       },
     });
     motorRef.current = motor;
+    if (!motor) {
+      setSem3d(true);
+      setPronto(true);
+    }
 
     const aoRolar = () => {
       const meio = window.scrollY + window.innerHeight / 2;
@@ -66,7 +83,11 @@ export default function Experiencia() {
       for (let i = 0; i < centros.length - 1; i++) {
         if (meio >= centros[i]) p = i + Math.min(1, (meio - centros[i]) / (centros[i + 1] - centros[i]));
       }
-      motor.setProgresso(p);
+      motor?.setProgresso(p);
+      // plano B sem 3D: as imagens das cenas trocam com a rolagem
+      fundosRef.current.forEach((img, i) => {
+        if (img) img.style.opacity = String(Math.max(0, 1 - Math.abs(p - i)));
+      });
       // revelar textos pela rolagem
       secoesRef.current.forEach((s, i) => {
         const bloco = s?.querySelector<HTMLElement>(".revelar");
@@ -78,7 +99,7 @@ export default function Experiencia() {
       });
     };
     const foto = new URLSearchParams(window.location.search);
-    if (foto.has("p")) {
+    if (motor && foto.has("p")) {
       // ?p=2&planta=1&foco=0.5 : modo foto para conferir cada seção num print
       setPronto(true);
       setModoFoto(true);
@@ -93,7 +114,7 @@ export default function Experiencia() {
     return () => {
       window.removeEventListener("scroll", aoRolar);
       window.removeEventListener("resize", aoRolar);
-      motor.destruir();
+      motor?.destruir();
     };
   }, []);
 
@@ -107,6 +128,28 @@ export default function Experiencia() {
     <div className="pagina relative">
       <canvas ref={canvasRef} className="fixed inset-0 h-screen w-screen" />
       <div ref={rotulosRef} className="pointer-events-none fixed inset-0" />
+      {sem3d && (
+        <>
+          <div className="fixed inset-0">
+            {SECOES.map((s, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={s.id}
+                ref={(el) => {
+                  fundosRef.current[i] = el;
+                }}
+                src={`/fallback/cena-${i}.jpg`}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
+                style={{ opacity: i === 0 ? 1 : 0 }}
+              />
+            ))}
+          </div>
+          <p className="fixed right-4 bottom-4 z-20 max-w-xs rounded-lg bg-black/55 px-3 py-2 text-right text-xs text-neutral-300 backdrop-blur">
+            Versão em imagens: seu navegador não abriu o 3D. Para a experiência completa, ative a aceleração de hardware.
+          </p>
+        </>
+      )}
 
       <div
         className={`fixed inset-0 z-30 flex items-center justify-center bg-[#0a0a0b] transition-opacity duration-700 ${pronto ? "pointer-events-none opacity-0" : "opacity-100"} ${modoFoto ? "hidden" : ""}`}
